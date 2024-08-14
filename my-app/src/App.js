@@ -1,171 +1,221 @@
-import * as yup from 'yup';
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import styles from './App.module.css';
 
-const sendFormData = (formData) => {
-	console.log(formData);
-};
-
-const emailChangeSchema = yup
-	.string()
-	.matches(
-		/^[-.@\w_]*$/,
-		'Неверный email. Допустимые символы: буквы, цифры, дефис, точка и нижнее подчеркивание.',
-	)
-	.max(25, 'Неверный email. Должно быть не более 25 символов.');
-
-const emailBlurSchema = yup
-	.string()
-	.min(7, 'Неверный email. Должно быть не менее 7 символов.');
-
-const passwordChangeSchema = yup
-	.string()
-	.max(35, 'Неверный пароль. Пароль должен содержать не более 35 символов');
-
-const passwordBlurSchema = yup
-	.string()
-	.matches(
-		/^(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^\w\s]).{0,}/,
-		'Неверный пароль. Пароль должен содержать строчные и прописные буквы латиницы, цифры и специальные символы.',
-	)
-	.min(6, 'Пароль должен содержать не менее 6 символов.');
-
-const validateAndGetErrorMessage = (schema, value) => {
-	let errorMessage = null;
-
-	try {
-		schema.validateSync(value, { abortEarly: false });
-	} catch ({ errors }) {
-		errorMessage = errors.join('\n');
-	}
-
-	return errorMessage;
-};
-
 export const App = () => {
-	const [email, setEmail] = useState('');
-	const [emailError, setEmailError] = useState(null);
+	const [todos, setTodos] = useState([]);
+	const [isLoading, setIsLoading] = useState(false);
+	const [isCreating, setIsCreating] = useState(false);
+	const [isDeleting, setIsDeleting] = useState(false);
+	const [isEdit, setIsEdit] = useState(false);
+	const [refreshTodosFlag, setRefreshTodosFlag] = useState(false);
+	const [searchTodo, setSearchTodo] = useState('');
+	const [isSortingEnabled, setIsSortingEnabled] = useState(false);
+	const [newTodoText, setNewTodoText] = useState('');
 
-	const [password, setPassword] = useState('');
-	const [passwordError, setPasswordError] = useState(null);
+	const refreshTodos = () => setRefreshTodosFlag(!refreshTodosFlag);
 
-	const [passwordRepeat, setPasswordRepeat] = useState('');
-	const [passwordRepeatError, setPasswordRepeatError] = useState(null);
+	const filteredTodos = todos.filter((todo) => todo.text.includes(searchTodo));
 
-	const submitButtonRef = useRef(null);
+	useEffect(() => {
+		setIsLoading(true);
 
-	const onEmailChange = ({ target }) => {
-		setEmail(target.value);
+		fetch('http://localhost:3002/todos')
+			.then((loadedData) => loadedData.json())
+			.then((loadedTodos) => {
+				setTodos(loadedTodos);
+			})
+			.finally(() => setIsLoading(false));
+	}, [refreshTodosFlag]);
 
-		const newErrorOfEmail = validateAndGetErrorMessage(
-			emailChangeSchema,
-			target.value,
-		);
+	const onSortingChange = () => {
+		setIsSortingEnabled(!isSortingEnabled);
+		console.log(isSortingEnabled);
 
-		setEmailError(newErrorOfEmail);
-	};
+		if (!isSortingEnabled) {
+			const sortedTodos = [...filteredTodos];
+			sortedTodos.sort((a, b) => {
+				if (a.text.toLowerCase() < b.text.toLowerCase()) {
+					return -1;
+				}
+				if (a.text.toLowerCase() > b.text.toLowerCase()) {
+					return 1;
+				}
+				return 0;
+			});
+			setTodos(sortedTodos);
+			console.log('sortedTodos:', sortedTodos, 'filteredTodos:', filteredTodos);
+		} else if (isSortingEnabled) {
+			setTodos(filteredTodos);
 
-	const onEmailBlur = ({ target }) => {
-		const newErrorOfEmail = validateAndGetErrorMessage(emailBlurSchema, target.value);
-		setEmailError(newErrorOfEmail);
-	};
-
-	const onPasswordChange = ({ target }) => {
-		setPassword(target.value);
-
-		const newErrorOfPassword = validateAndGetErrorMessage(
-			passwordChangeSchema,
-			target.value,
-		);
-		setPasswordError(newErrorOfPassword);
-	};
-
-	const onPasswordBlur = ({ target }) => {
-		const newErrorOfPassword = validateAndGetErrorMessage(
-			passwordBlurSchema,
-			target.value,
-		);
-		setPasswordError(newErrorOfPassword);
-	};
-
-	const onCorrectOfPasswordRepeat = ({ target }) => {
-		setPasswordRepeat(target.value);
-
-		let newErrorOfPasswordRepeat = null;
-		if (target.value !== password) {
-			newErrorOfPasswordRepeat =
-				'Повторный пароль не совпадает с введенным паролем';
-		}
-
-		setPasswordRepeatError(newErrorOfPasswordRepeat);
-
-		if (!newErrorOfPasswordRepeat) {
-			submitButtonRef.current.focus();
+			console.log('filteredTodos:', filteredTodos);
 		}
 	};
 
-	const onSubmit = (event) => {
+	const addTodo = (event) => {
 		event.preventDefault();
-		if ((email, password, passwordRepeat)) {
-			sendFormData({ email, password, passwordRepeat });
-		}
+		setIsCreating(true);
+
+		fetch('http://localhost:3002/todos', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json;charset=utf-8' },
+			body: JSON.stringify({
+				text: newTodoText,
+				completed: false,
+			}),
+		})
+			.then((rawResponse) => rawResponse.json())
+			.then((response) => {
+				console.log('Добавлена новая задача, ответ сервера:', response);
+				console.log('newTodo', newTodoText);
+				refreshTodos();
+				console.log(filteredTodos);
+			})
+			.finally(() => setIsCreating(false));
 	};
 
+	const onCompletedChange = (id, target) => {
+		let url = 'http://localhost:3002/todos/';
+		let newUrl = url + `/${id}`;
+
+		fetch(newUrl, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json;charset=utf-8' },
+			body: JSON.stringify({
+				completed: target,
+			}),
+		})
+			.then((rawResponse) => rawResponse.json())
+			.then((response) => {
+				console.log('Редактирована задача, ответ сервера:', response);
+				refreshTodos();
+			});
+	};
+	const onUpdating = (id) => {
+		setIsEdit(true);
+	};
+
+	const onSubmit = (id, event) => {
+		event.preventDefault();
+
+		let url = 'http://localhost:3002/todos/';
+		let newUrl = url + `/${id}`;
+		fetch(newUrl, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json;charset=utf-8' },
+			body: JSON.stringify({
+				text: newTodoText,
+			}),
+		})
+			.then((rawResponse) => rawResponse.json())
+			.then((response) => {
+				console.log('Редактирована задача, ответ сервера:', response);
+				refreshTodos();
+				console.log(refreshTodosFlag);
+			})
+			.finally(() => setIsEdit(false));
+	};
+
+	const onRemoveTodo = (id) => {
+		setIsDeleting(true);
+
+		let url = 'http://localhost:3002/todos/';
+		let newUrl = url + `/${id}`;
+
+		fetch(newUrl, {
+			method: 'DELETE',
+		})
+			.then((rawResponse) => rawResponse.json())
+			.then((response) => {
+				console.log('Задача удалена, ответ сервера: ', response);
+				refreshTodos();
+			})
+			.finally(() => setIsDeleting(false));
+	};
+
+	if (isLoading) {
+		return <div className={styles.loader}></div>;
+	}
 	return (
 		<div className={styles.app}>
-			Регистрация
-			<form className={styles.form} onSubmit={onSubmit}>
-				{emailError && <div className={styles.error}>{emailError}</div>}
-				{passwordError && <div className={styles.error}>{passwordError}</div>}
-				{passwordRepeatError && (
-					<div className={styles.error}>{passwordRepeatError}</div>
-				)}
-				<input
-					className={styles.input}
-					name="email"
-					type="email"
-					placeholder="Почта"
-					value={email}
-					onChange={onEmailChange}
-					onBlur={onEmailBlur}
-				/>
-				<input
-					className={styles.input}
-					name="password"
-					type="password"
-					placeholder="Пароль"
-					value={password}
-					onChange={onPasswordChange}
-					onBlur={onPasswordBlur}
-				/>
-				<input
-					className={styles.input}
-					name="password"
-					type="password"
-					placeholder="Повтор пароля"
-					value={passwordRepeat}
-					onChange={onCorrectOfPasswordRepeat}
-				/>
-				<button
-					className={styles.button}
-					ref={submitButtonRef}
-					type="submit"
-					disabled={!!emailError || !!passwordError || !!passwordRepeatError}
-				>
-					Зарегистрироваться
-				</button>
+			<form className={styles.todoForm} onSubmit={(event) => addTodo(event)}>
+				<div>
+					<input
+						type="text"
+						placeholder="Создать новую задачу..."
+						onChange={({ target }) => setNewTodoText(target.value)}
+					/>
+					<button type="submit" disabled={isCreating}>
+						Добавить задачу
+					</button>
+				</div>{' '}
 			</form>
-			<p className={styles.infotitle}>* Информация:</p>
-			<p className={styles.info}>
-				- Длина email должна составлять от 7-ми до 25-ти (включительно) символов.
-				Email должен состоять из следующих символов на выбор: латинские буквы,
-				цифры, дефис, точка, нижнее подчеркивание.{' '}
-			</p>
-			<p className={styles.info}>
-				- Пароль должен содержать строчные и прописные буквы латиницы, цифры и
-				специальные символы. Длина пароля должна быть не менее 6-ти и не более
-				35-ти символов.
-			</p>
+			<div className={styles.todoListTitle}>Список дел:</div>
+			<input
+				className={styles.searchTodo}
+				type="text"
+				value={searchTodo}
+				placeholder="Поиск..."
+				onChange={({ target }) => setSearchTodo(target.value)}
+			/>
+			<input
+				className={styles.sortingTodos}
+				type="checkbox"
+				checked={isSortingEnabled}
+				onChange={({ target }) => onSortingChange(target.checked)}
+			/>
+			<div className={styles.todoList}>
+				{filteredTodos.map(({ id, text, completed }) => (
+					<div className={styles.todoListItem} key={id}>
+						<form
+							className={styles.todoForm}
+							onSubmit={(event) => onSubmit(id, event)}
+						>
+							<div className={styles.todoText}>
+								<input
+									className={styles.todoChecked}
+									type="checkbox"
+									checked={completed}
+									onChange={({ target }) =>
+										onCompletedChange(id, target.checked)
+									}
+								/>
+								<div className={styles.todo}>
+									{isEdit ? (
+										<input
+											className={styles.todoItemInput}
+											id={id}
+											type="text"
+											value={newTodoText}
+											onChange={({ target }) => {
+												setNewTodoText(target.value);
+											}}
+										/>
+									) : (
+										<label className={styles.todoItem}>{text}</label>
+									)}
+								</div>
+							</div>
+							<button
+								type="button"
+								onClick={(e) => onUpdating(id)}
+								className={styles.editTodoButton}
+							>
+								Редактировать
+							</button>
+							<button type="submit" className={styles.saveTodoButton}>
+								Сохранить
+							</button>
+							<button
+								type="button"
+								onClick={(e) => onRemoveTodo(id)}
+								className={styles.deleteTodoButton}
+							>
+								Удалить
+							</button>
+						</form>
+					</div>
+				))}
+			</div>
 		</div>
 	);
 };
