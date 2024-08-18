@@ -1,8 +1,10 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, Fragment } from 'react';
 import styles from './App.module.css';
+import { ref, onValue, push, update, remove } from 'firebase/database';
+import { db } from './firebase';
 
 export const App = () => {
-	const [todos, setTodos] = useState([]);
+	const [todos, setTodos] = useState({});
 	const [isLoading, setIsLoading] = useState(false);
 	const [isCreating, setIsCreating] = useState(false);
 	const [isDeleting, setIsDeleting] = useState(false);
@@ -11,106 +13,52 @@ export const App = () => {
 	const [searchTodo, setSearchTodo] = useState('');
 	const [isSortingEnabled, setIsSortingEnabled] = useState(false);
 	const [newTodoText, setNewTodoText] = useState('');
+	const [changingTaskID, setChangingTaskID] = useState('');
 
-	const refreshTodos = () => setRefreshTodosFlag(!refreshTodosFlag);
-
-	const filteredTodos = todos.filter((todo) => todo.text.includes(searchTodo));
+	const filteredTodos = searchTodo
+		? todos.filter((todo) => todo.text.toLowerCase().includes(searchTodo))
+		: isSortingEnabled
+			? Object.values(todos).sort((a, b) => a.text.localeCompare(b.text))
+			: todos;
 
 	useEffect(() => {
-		setIsLoading(true);
+		const todosDbRef = ref(db, 'todos');
 
-		fetch('http://localhost:3002/todos')
-			.then((loadedData) => loadedData.json())
-			.then((loadedTodos) => {
-				setTodos(loadedTodos);
-			})
-			.finally(() => setIsLoading(false));
-	}, [refreshTodosFlag]);
-
-	const onSortingChange = () => {
-		setIsSortingEnabled(!isSortingEnabled);
-		console.log(isSortingEnabled);
-
-		if (!isSortingEnabled) {
-			const sortedTodos = [...filteredTodos];
-			sortedTodos.sort((a, b) => {
-				if (a.text.toLowerCase() < b.text.toLowerCase()) {
-					return -1;
-				}
-				if (a.text.toLowerCase() > b.text.toLowerCase()) {
-					return 1;
-				}
-				return 0;
-			});
-			setTodos(sortedTodos);
-			console.log('sortedTodos:', sortedTodos, 'filteredTodos:', filteredTodos);
-		} else if (isSortingEnabled) {
-			setTodos(filteredTodos);
-
-			console.log('filteredTodos:', filteredTodos);
-		}
-	};
+		return onValue(todosDbRef, (snapshot) => {
+			const loadedTodos = snapshot.val() || {};
+			setTodos(loadedTodos);
+			setIsLoading(false);
+		});
+	}, []);
 
 	const addTodo = (event) => {
-		event.preventDefault();
+		//event.preventDefault();
 		setIsCreating(true);
 
-		fetch('http://localhost:3002/todos', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json;charset=utf-8' },
-			body: JSON.stringify({
-				text: newTodoText,
-				completed: false,
-			}),
+		const todosDbRef = ref(db, 'todos');
+		push(todosDbRef, {
+			text: newTodoText,
+			completed: false,
 		})
-			.then((rawResponse) => rawResponse.json())
 			.then((response) => {
 				console.log('Добавлена новая задача, ответ сервера:', response);
-				console.log('newTodo', newTodoText);
-				refreshTodos();
-				console.log(filteredTodos);
 			})
 			.finally(() => setIsCreating(false));
 	};
 
 	const onCompletedChange = (id, target) => {
-		let url = 'http://localhost:3002/todos/';
-		let newUrl = url + `/${id}`;
-
-		fetch(newUrl, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json;charset=utf-8' },
-			body: JSON.stringify({
-				completed: target,
-			}),
-		})
-			.then((rawResponse) => rawResponse.json())
-			.then((response) => {
-				console.log('Редактирована задача, ответ сервера:', response);
-				refreshTodos();
-			});
+		const updateTodoRef = ref(db, `todos/${id}`);
+		update(updateTodoRef, { completed: target }).then((response) => {
+			console.log('Задача поменяла "completed", ответ сервера:', response);
+		});
 	};
-	const onUpdating = (id) => {
+
+	const onSubmit = (id) => {
 		setIsEdit(true);
-	};
-
-	const onSubmit = (id, event) => {
-		event.preventDefault();
-
-		let url = 'http://localhost:3002/todos/';
-		let newUrl = url + `/${id}`;
-		fetch(newUrl, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json;charset=utf-8' },
-			body: JSON.stringify({
-				text: newTodoText,
-			}),
-		})
-			.then((rawResponse) => rawResponse.json())
+		const updateTodoRef = ref(db, `todos/${id}`);
+		update(updateTodoRef, { text: newTodoText })
 			.then((response) => {
 				console.log('Редактирована задача, ответ сервера:', response);
-				refreshTodos();
-				console.log(refreshTodosFlag);
 			})
 			.finally(() => setIsEdit(false));
 	};
@@ -118,16 +66,10 @@ export const App = () => {
 	const onRemoveTodo = (id) => {
 		setIsDeleting(true);
 
-		let url = 'http://localhost:3002/todos/';
-		let newUrl = url + `/${id}`;
-
-		fetch(newUrl, {
-			method: 'DELETE',
-		})
-			.then((rawResponse) => rawResponse.json())
+		const deleteTodoRef = ref(db, `todos/${id}`);
+		remove(deleteTodoRef)
 			.then((response) => {
 				console.log('Задача удалена, ответ сервера: ', response);
-				refreshTodos();
 			})
 			.finally(() => setIsDeleting(false));
 	};
@@ -135,6 +77,7 @@ export const App = () => {
 	if (isLoading) {
 		return <div className={styles.loader}></div>;
 	}
+
 	return (
 		<div className={styles.app}>
 			<form className={styles.todoForm} onSubmit={(event) => addTodo(event)}>
@@ -161,10 +104,10 @@ export const App = () => {
 				className={styles.sortingTodos}
 				type="checkbox"
 				checked={isSortingEnabled}
-				onChange={({ target }) => onSortingChange(target.checked)}
+				onChange={() => setIsSortingEnabled(!isSortingEnabled)}
 			/>
 			<div className={styles.todoList}>
-				{filteredTodos.map(({ id, text, completed }) => (
+				{Object.entries(filteredTodos).map(([id, { text, completed }]) => (
 					<div className={styles.todoListItem} key={id}>
 						<form
 							className={styles.todoForm}
@@ -180,7 +123,7 @@ export const App = () => {
 									}
 								/>
 								<div className={styles.todo}>
-									{isEdit ? (
+									{changingTaskID === id ? (
 										<input
 											className={styles.todoItemInput}
 											id={id}
@@ -197,7 +140,7 @@ export const App = () => {
 							</div>
 							<button
 								type="button"
-								onClick={(e) => onUpdating(id)}
+								onClick={(e) => setChangingTaskID(id)}
 								className={styles.editTodoButton}
 							>
 								Редактировать
